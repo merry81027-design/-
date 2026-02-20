@@ -16,11 +16,11 @@ st.divider()
 SHEET_ID = "1VVm5MkdMzYF80dngcnHiBIWz7D1Sh0BnQeRvlKlA9DA" 
 URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-# 設定快取時間為 10 秒 (ttl=10)。代表您在 Excel 改完資料，網頁最多 10 秒後就會更新！
 @st.cache_data(ttl=10)
 def load_data(url):
     df = pd.read_csv(url, dtype={'學年度': str, '系校代碼': str})
-    df = df.dropna(subset=['系校代碼'])
+    # 這裡稍微放寬限制，即使代碼是空的，只要有系名我們也留著
+    df = df.dropna(subset=['學校名稱', '校系名稱']) 
     return df
 
 try:
@@ -33,7 +33,6 @@ except Exception as e:
 # ==========================================
 # 3. 網頁搜尋介面與「校名翻譯蒟蒻」
 # ==========================================
-# 建立常見大學簡稱字典
 alias_dict = {
     "台大": "臺灣大學",
     "臺大": "臺灣大學",
@@ -70,19 +69,18 @@ alias_dict = {
     "北醫": "臺北醫學大學"
 }
 
-user_input = st.text_input("🔍 請輸入學校或科系關鍵字：", placeholder="例如：政大 心理")
+user_input = st.text_input("🔍 請輸入學校或科系關鍵字：", placeholder="例如：彰師大 輔導")
 
 if user_input:
     # --- 步驟 A: 將使用者的簡稱翻譯成正式全名 ---
-    search_query = user_input.replace('台', '臺') # 先統一將台轉成臺
+    search_query = user_input.replace('台', '臺')
     
-   # 掃描字典 (加入 sorted 確保先替換名字長的，避免「高師大」被「師大」攔截)
+    # 確保優先替換字數長的簡稱，防止吃字
     for short_name in sorted(alias_dict.keys(), key=len, reverse=True):
         full_name = alias_dict[short_name]
         if short_name in search_query:
             search_query = search_query.replace(short_name, full_name)
             
-    # 切割關鍵字 (例如 "政治大學 心理" 變成 ["政治大學", "心理"])
     keywords = search_query.split()
     
     # --- 步驟 B: 執行搜尋 ---
@@ -94,7 +92,6 @@ if user_input:
         
     candidates = df[mask]
     
-    # 如果還是找不到，用原始字串再試一次保險
     if candidates.empty:
         raw_keywords = user_input.split()
         mask_retry = pd.Series([True] * len(df))
@@ -102,25 +99,30 @@ if user_input:
             mask_retry = mask_retry & df['full_text'].str.contains(k, na=False)
         candidates = df[mask_retry]
 
-    # --- 步驟 C: 顯示結果 ---
+    # --- 步驟 C: 顯示結果 (改為以「學校+系名」為主) ---
     if candidates.empty:
         st.warning(f"⚠️ 找不到包含「{user_input}」的科系，請嘗試更換或縮短關鍵字。")
     else:
-        target_codes = candidates['系校代碼'].unique()
-        st.success(f"🎯 找到 {len(target_codes)} 個相關科系！")
+        # 找出不重複的「學校 + 科系」組合
+        unique_depts = candidates[['學校名稱', '校系名稱']].drop_duplicates()
+        st.success(f"🎯 找到 {len(unique_depts)} 個相關科系！")
         
-        for code in target_codes:
-            history_data = df[df['系校代碼'] == code]
+        for index, row in unique_depts.iterrows():
+            school = row['學校名稱']
+            dept = row['校系名稱']
+            
+            # 使用學校和系名去歷史資料庫撈出三年資料
+            history_data = df[(df['學校名稱'] == school) & (df['校系名稱'] == dept)]
             history_data = history_data.sort_values(by='學年度', ascending=False)
             
-            school_name = history_data.iloc[0]['學校名稱']
-            dept_names = history_data['校系名稱'].unique()
-            dept_name_display = " / ".join(dept_names)
+            # 抓取歷年用過的代碼顯示在備註，讓使用者知道代碼有換過
+            codes = history_data['系校代碼'].dropna().unique()
+            codes_display = " / ".join(codes) if len(codes) > 0 else "無紀錄"
             
-            st.subheader(f"🏫 【{school_name}】")
-            st.caption(f"📌 系名紀錄：{dept_name_display} (代碼：{code})")
+            st.subheader(f"🏫 【{school}】 {dept}")
+            st.caption(f"📌 歷年使用代碼：{codes_display}")
             
-            cols = ['學年度', '校系名稱', '招生名額', '篩選一', '篩選二', '篩選三', '篩選四', '篩選五']
+            cols = ['學年度', '招生名額', '篩選一', '篩選二', '篩選三', '篩選四', '篩選五']
             show_cols = [c for c in cols if c in history_data.columns]
             
             st.dataframe(history_data[show_cols], hide_index=True, use_container_width=True)
