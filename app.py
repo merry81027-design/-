@@ -46,7 +46,7 @@ alias_dict = {
     "台師大": "臺灣師範大學",
     "臺師大": "臺灣師範大學",
     "彰師大": "彰化師範大學",
-    "高師大": "國立高雄師範大學",
+    "高師大": "高雄師範大學",
     "國北教": "臺北教育大學",
     "國北護": "臺北護理健康大學",
     "市北教": "臺北市立大學",
@@ -76,8 +76,9 @@ if user_input:
     # --- 步驟 A: 將使用者的簡稱翻譯成正式全名 ---
     search_query = user_input.replace('台', '臺') # 先統一將台轉成臺
     
-    # 掃描字典，如果有在裡面，就替換掉
-    for short_name, full_name in alias_dict.items():
+   # 掃描字典 (加入 sorted 確保先替換名字長的，避免「高師大」被「師大」攔截)
+    for short_name in sorted(alias_dict.keys(), key=len, reverse=True):
+        full_name = alias_dict[short_name]
         if short_name in search_query:
             search_query = search_query.replace(short_name, full_name)
             
